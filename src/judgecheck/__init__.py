@@ -5,3 +5,8 @@ checks, and confidence intervals.
 """
 
 __version__ = "0.1.0"
+
+from judgecheck.ingest import MalformedTraceError, load_jsonl
+from judgecheck.records import TraceRecord
+
+__all__ = ["MalformedTraceError", "TraceRecord", "__version__", "load_jsonl"]
