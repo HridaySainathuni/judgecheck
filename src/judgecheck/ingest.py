@@ -75,3 +75,121 @@ def load_jsonl(path: str | Path) -> list[TraceRecord]:
                     f"{path}: line {line_number}: {exc}"
                 ) from exc
     return records
+
+
+def _langsmith_timestamp(value: object) -> datetime | None:
+    """Parse a LangSmith ``created_at`` value, defaulting to None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _langsmith_messages(inputs: object) -> list[dict]:
+    """Turn a LangSmith example's ``inputs`` into chat messages.
+
+    A ``messages`` list passes through unchanged. A single string
+    input becomes one user message; anything else is serialized as
+    JSON in one user message. Missing or non-dict inputs give no
+    messages.
+    """
+    if not isinstance(inputs, dict):
+        return []
+    messages = inputs.get("messages")
+    if isinstance(messages, list):
+        return [message for message in messages if isinstance(message, dict)]
+    if len(inputs) == 1:
+        value = next(iter(inputs.values()))
+        if isinstance(value, str):
+            return [{"role": "user", "content": value}]
+    if not inputs:
+        return []
+    return [{"role": "user", "content": json.dumps(inputs, sort_keys=True)}]
+
+
+def _langsmith_output(outputs: object) -> str:
+    """Turn a LangSmith example's ``outputs`` into the record output.
+
+    An ``output`` key wins; a single string value is used as-is;
+    anything else is serialized as JSON. Missing or empty outputs
+    give an empty string.
+    """
+    if not isinstance(outputs, dict) or not outputs:
+        return ""
+    value = outputs.get("output")
+    if isinstance(value, str):
+        return value
+    if len(outputs) == 1:
+        value = next(iter(outputs.values()))
+        if isinstance(value, str):
+            return value
+    return json.dumps(outputs, sort_keys=True)
+
+
+def load_langsmith(path: str | Path) -> list[TraceRecord]:
+    """Load trace records from a LangSmith JSON dataset export.
+
+    The export is either a JSON list of examples or an object with an
+    ``examples`` key. Each example carries ``inputs`` and ``outputs``
+    dicts; inputs map to the record messages, outputs to the record
+    output, and the model name and metadata carry through when the
+    export has them. Missing fields fall back to clear defaults
+    instead of raising: no id becomes ``langsmith-<index>``, missing
+    inputs give no messages, missing outputs give an empty output,
+    and a missing or unparseable timestamp gives ``None``.
+
+    A file that is not valid JSON, or an example that is not a JSON
+    object, raises :class:`MalformedTraceError`.
+    """
+    path = Path(path)
+    with path.open(encoding="utf-8") as handle:
+        try:
+            data = json.load(handle)
+        except json.JSONDecodeError as exc:
+            raise MalformedTraceError(f"{path}: not valid JSON: {exc}") from exc
+    if isinstance(data, dict):
+        examples = data.get("examples")
+        if examples is None:
+            raise MalformedTraceError(
+                f"{path}: expected a list of examples or an object "
+                "with an 'examples' key"
+            )
+    elif isinstance(data, list):
+        examples = data
+    else:
+        raise MalformedTraceError(
+            f"{path}: expected a list of examples or an object "
+            "with an 'examples' key"
+        )
+    if not isinstance(examples, list):
+        raise MalformedTraceError(
+            f"{path}: 'examples' must be a list of example objects"
+        )
+    records: list[TraceRecord] = []
+    for index, example in enumerate(examples):
+        if not isinstance(example, dict):
+            raise MalformedTraceError(
+                f"{path}: example {index}: expected a JSON object"
+            )
+        metadata = example.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        model = example.get("model")
+        if not isinstance(model, str):
+            model = metadata.get("model")
+        if not isinstance(model, str):
+            model = None
+        records.append(
+            TraceRecord(
+                trace_id=str(example.get("id") or f"langsmith-{index}"),
+                timestamp=_langsmith_timestamp(example.get("created_at")),
+                messages=_langsmith_messages(example.get("inputs")),
+                output=_langsmith_output(example.get("outputs")),
+                model=model,
+                metadata=metadata,
+                source=str(path),
+            )
+        )
+    return records

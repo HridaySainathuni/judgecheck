@@ -6,7 +6,13 @@ checks, and confidence intervals.
 
 __version__ = "0.1.0"
 
-from judgecheck.ingest import MalformedTraceError, load_jsonl
+from judgecheck.ingest import MalformedTraceError, load_jsonl, load_langsmith
 from judgecheck.records import TraceRecord
 
-__all__ = ["MalformedTraceError", "TraceRecord", "__version__", "load_jsonl"]
+__all__ = [
+    "MalformedTraceError",
+    "TraceRecord",
+    "__version__",
+    "load_jsonl",
+    "load_langsmith",
+]
