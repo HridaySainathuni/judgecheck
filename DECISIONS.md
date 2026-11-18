@@ -55,3 +55,31 @@ Alternatives considered:
 - Raising plain `ValueError`. That gives callers no way to tell a bad trace file apart from any other value error.
 
 Why: one named error type lets callers catch exactly this failure, and failing the whole load with the file and line number makes a bad trace easy to find and fix. Raising instead of skipping keeps the trace count honest.
+
+## One Judge protocol with prompt and model set at construction
+
+Date: 2026-11-18
+
+Choice: every judge implements the `Judge` protocol in `src/judgecheck/judges.py`: one `judge` method that takes a `TraceRecord` and returns a `Judgement` with a boolean `verdict` and a string `rationale`. Each judge calls an LLM through the Anthropic SDK, with the prompt template and model set at construction and the API key read from the `ANTHROPIC_API_KEY` environment variable. A pre-built client can be injected instead, which the tests use to avoid network calls.
+
+Alternatives considered:
+
+- A single judge class with a mode flag for each check. That would mix the prompts and verdict parsing for different checks in one class, and adding a check would mean editing the class instead of adding a new one.
+- A plain function per judge. Functions cannot hold a configured prompt, model, and client together, so every call site would repeat that setup.
+- Reading the API key from a config file. An environment variable is the standard way to pass secrets to a CLI tool, and it keeps keys out of the repo.
+
+Why: one protocol means the reliability checks in later milestones can run any judge the same way, without knowing which check it performs. Prompt and model at construction let a user tune a judge for their own traces without editing library code. The env API key keeps the secret out of the code, and injecting a client keeps the tests fast and offline.
+
+## Relevance and grounding as the first two judges
+
+Date: 2026-11-18
+
+Choice: the first two judges are `RelevanceJudge` and `GroundingJudge`. `RelevanceJudge` checks whether the trace output answers the trace input. `GroundingJudge` checks whether every claim in the trace output is supported by the trace input, with no invented claims. Both follow the `Judge` protocol and share the same construction pattern: prompt template and model configurable, client injected or built from the environment.
+
+Alternatives considered:
+
+- Starting with a style or tone judge. Style is subjective and varies by use case, so a style verdict is hard to trust as a reliability signal.
+- Starting with a judge that scores on a scale instead of a yes or no verdict. A scale adds calibration work before the toolkit can even report a pass rate, and the reliability checks need binary outcomes first.
+- Building more judges before shipping these two. Each new judge is cheap to add under the protocol, so the two most common failure modes are worth shipping first and the rest can follow.
+
+Why: relevance and grounding are the two most common ways an LLM answer goes wrong in a way a judge should catch: an answer that misses the question, and an answer that invents facts. A judge that cannot catch those two is not useful, so they come first. Both are binary verdicts, which the later reliability checks can count directly.
