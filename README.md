@@ -6,7 +6,7 @@ An LLM judge can score a de-identified response as a bad answer and sound confid
 
 ## Status
 
-Milestone 1 is done: trace ingestion works. `load_jsonl` loads traces from JSONL files and `load_langsmith` loads them from LangSmith dataset exports, both into one shared `TraceRecord` type. Next up are the judges and reliability checks.
+Milestone 2 is done: configurable LLM judges work. `RelevanceJudge` checks whether a trace output answers its input, and `GroundingJudge` checks whether every claim in the output is supported by the input. Both follow one `Judge` protocol, with the prompt and model set at construction. Next up are the reliability checks.
 
 ## Install
 
@@ -38,6 +38,34 @@ print(f"loaded {len(langsmith_records)} traces from LangSmith")
 ```
 
 A line that is not valid JSON or lacks a required field raises `MalformedTraceError` naming the file and line number.
+
+## Judges
+
+A judge scores one trace and returns a verdict plus a rationale. Every judge follows the `Judge` protocol: a `judge` method that takes a `TraceRecord` and returns a `Judgement` with a boolean `verdict` and a string `rationale`.
+
+Two judges are built in:
+
+- `RelevanceJudge`: does the trace output answer the trace input?
+- `GroundingJudge`: is every claim in the trace output supported by the trace input, with no invented claims?
+
+Both call an LLM through the Anthropic SDK, with the API key read from the `ANTHROPIC_API_KEY` environment variable. The prompt template and model are set at construction, so a judge can be tuned without editing library code.
+
+```python
+from judgecheck.ingest import load_jsonl
+from judgecheck.judges import GroundingJudge, RelevanceJudge
+
+records = load_jsonl("traces.jsonl")
+relevance = RelevanceJudge()
+grounding = GroundingJudge()
+
+for record in records:
+    relevance_result = relevance.judge(record)
+    grounding_result = grounding.judge(record)
+    print(record.trace_id, relevance_result.verdict, grounding_result.verdict)
+    print(grounding_result.rationale)
+```
+
+An empty trace output returns a negative verdict without calling the LLM.
 
 ## What it will do
 

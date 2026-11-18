@@ -1,10 +1,10 @@
-"""Tests for the judge interface and the relevance judge."""
+"""Tests for the judge interface and the relevance and grounding judges."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from judgecheck.judges import Judgement, RelevanceJudge
+from judgecheck.judges import GroundingJudge, Judgement, RelevanceJudge
 from judgecheck.records import TraceRecord
 
 
@@ -65,6 +65,47 @@ def test_relevance_judge_negative_verdict() -> None:
 def test_empty_output_returns_negative_verdict_without_calling_llm() -> None:
     client = _FakeClient("VERDICT: RELEVANT\nThis should never be used.")
     judge = RelevanceJudge(client=client)
+
+    result = judge.judge(_trace(output="   "))
+
+    assert result.verdict is False
+    assert "empty" in result.rationale
+    assert client.messages.calls == []
+
+
+def test_grounding_judge_returns_verdict_and_rationale() -> None:
+    client = _FakeClient(
+        "VERDICT: GROUNDED\nEvery claim in the output is supported by the input."
+    )
+    judge = GroundingJudge(client=client)
+
+    result = judge.judge(_trace())
+
+    assert isinstance(result, Judgement)
+    assert result.verdict is True
+    assert "supported by the input" in result.rationale
+    assert len(client.messages.calls) == 1
+
+
+def test_grounding_judge_negative_verdict_for_invented_claim() -> None:
+    client = _FakeClient(
+        "VERDICT: NOT GROUNDED\nThe founding year is not in the input."
+    )
+    judge = GroundingJudge(client=client)
+
+    result = judge.judge(
+        _trace(
+            output="Paris is the capital of France, founded in the year 1800."
+        )
+    )
+
+    assert result.verdict is False
+    assert "founding year" in result.rationale
+
+
+def test_grounding_judge_empty_output_returns_negative_verdict_without_calling_llm() -> None:
+    client = _FakeClient("VERDICT: GROUNDED\nThis should never be used.")
+    judge = GroundingJudge(client=client)
 
     result = judge.judge(_trace(output="   "))
 

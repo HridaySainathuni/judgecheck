@@ -29,6 +29,21 @@ starting with "VERDICT: RELEVANT" or "VERDICT: NOT RELEVANT", followed
 by a short rationale explaining your verdict.
 """
 
+DEFAULT_GROUNDING_PROMPT = """You are judging whether a response stays grounded in the
+source text it was given.
+
+Source text:
+{input}
+
+Response:
+{output}
+
+Is every claim in the response supported by the source text, with no
+invented claims? Reply with exactly one line starting with
+"VERDICT: GROUNDED" or "VERDICT: NOT GROUNDED", followed by a short
+rationale explaining your verdict.
+"""
+
 
 @dataclass
 class Judgement:
@@ -99,15 +114,64 @@ class RelevanceJudge:
             max_tokens=self.max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        return _parse_verdict(response.content[0].text)
+        return _parse_verdict(
+            response.content[0].text,
+            positive="relevant",
+            negative="not relevant",
+        )
 
 
-def _parse_verdict(text: str) -> Judgement:
+class GroundingJudge:
+    """Judge whether a trace output stays grounded in the trace input.
+
+    Every claim in the output must be supported by the input, with no
+    invented claims. The prompt and model are set at construction. Pass
+    ``client`` only to inject a pre-built Anthropic client (used by
+    tests); otherwise a client is built from the
+    ``ANTHROPIC_API_KEY`` environment variable.
+    """
+
+    def __init__(
+        self,
+        model: str = DEFAULT_MODEL,
+        prompt_template: str | None = None,
+        client: anthropic.Anthropic | None = None,
+        max_tokens: int = 512,
+    ) -> None:
+        self.model = model
+        self.prompt_template = prompt_template or DEFAULT_GROUNDING_PROMPT
+        self.client = client or anthropic.Anthropic()
+        self.max_tokens = max_tokens
+
+    def judge(self, trace: TraceRecord) -> Judgement:
+        """Return whether the trace output is grounded in the trace input."""
+        if not trace.output.strip():
+            return Judgement(
+                verdict=False,
+                rationale="Trace output is empty, so there is nothing to ground.",
+            )
+        prompt = self.prompt_template.format(
+            input=_trace_input(trace),
+            output=trace.output,
+        )
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _parse_verdict(
+            response.content[0].text,
+            positive="grounded",
+            negative="not grounded",
+        )
+
+
+def _parse_verdict(text: str, *, positive: str, negative: str) -> Judgement:
     """Parse a judge reply of the form ``VERDICT: ...`` plus rationale."""
     lowered = text.lower()
-    if "not relevant" in lowered:
+    if negative in lowered:
         verdict = False
-    elif "relevant" in lowered:
+    elif positive in lowered:
         verdict = True
     else:
         return Judgement(
