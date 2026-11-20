@@ -67,6 +67,24 @@ for record in records:
 
 An empty trace output returns a negative verdict without calling the LLM.
 
+## Statistics
+
+Two pure functions in `judgecheck.stats` quantify how much a judge score can be trusted. Neither makes LLM calls or reads files.
+
+- `wilson_interval(successes, trials, confidence=0.95)`: returns the (lower, upper) bounds of the Wilson score interval for a rate, as a pair of floats. Use it for any judge rate, for example the share of traces a judge marked relevant. With zero trials the interval is (0.0, 1.0).
+- `cohens_kappa(labels_a, labels_b)`: returns Cohen's kappa for two lists of labels, as a float. 1.0 is perfect agreement, 0.0 is agreement equal to chance, and negative values mean agreement worse than chance. Use it to compare a judge's labels against human labels.
+
+```python
+from judgecheck.stats import cohens_kappa, wilson_interval
+
+lower, upper = wilson_interval(38, 40)
+print(f"relevant: 95% Wilson interval [{lower:.2f}, {upper:.2f}]")
+
+judge_labels = ["relevant", "relevant", "not relevant"]
+human_labels = ["relevant", "not relevant", "not relevant"]
+print(f"kappa: {cohens_kappa(judge_labels, human_labels):.2f}")
+```
+
 ## What it will do
 
 - Ingest traces from OpenTelemetry and JSONL files and from LangSmith exports.

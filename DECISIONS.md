@@ -83,3 +83,31 @@ Alternatives considered:
 - Building more judges before shipping these two. Each new judge is cheap to add under the protocol, so the two most common failure modes are worth shipping first and the rest can follow.
 
 Why: relevance and grounding are the two most common ways an LLM answer goes wrong in a way a judge should catch: an answer that misses the question, and an answer that invents facts. A judge that cannot catch those two is not useful, so they come first. Both are binary verdicts, which the later reliability checks can count directly.
+
+## Wilson score interval for judge rates
+
+Date: 2026-11-20
+
+Choice: `wilson_interval` in `src/judgecheck/stats.py` reports a judge rate, for example the share of traces a judge marked relevant, as a Wilson score interval at a chosen confidence level, defaulting to 95 percent. With zero trials there is no information, so the interval is the full [0, 1] range. The function is pure: it takes counts and returns a pair of floats.
+
+Alternatives considered:
+
+- The normal approximation, also called the Wald interval: `p_hat` plus or minus `z` times the standard error. It is the textbook default, but it breaks down exactly where judge evals live. With small samples it can produce bounds outside [0, 1], and with a rate near 0 or 1 it collapses to a zero-width interval, which claims certainty the data does not support.
+- The exact Clopper-Pearson interval. It guarantees coverage, but it is wider than Wilson and needs a beta distribution, which adds a dependency or hand-rolled math for no practical gain at these sample sizes.
+- Bootstrapping the interval. Resampling works, but it is slower, nondeterministic unless seeded, and harder to explain in a report than a closed-form interval.
+
+Why: judge evals usually run on tens of traces, not thousands, and a rate of 0 or 1 is common when a judge is consistent. Wilson stays inside [0, 1], stays honest at the edges, and needs only the counts, so a report can print it next to any rate without extra machinery.
+
+## Cohen's kappa for judge vs human agreement
+
+Date: 2026-11-20
+
+Choice: `cohens_kappa` in `src/judgecheck/stats.py` measures agreement between a judge's labels and human labels as Cohen's kappa. 1.0 is perfect agreement, 0.0 is agreement equal to chance, and negative values mean agreement worse than chance. The function is pure: it takes two label lists and returns a float.
+
+Alternatives considered:
+
+- Raw agreement, the share of labels where judge and human match. It is easy to read, but it rewards a judge that always picks the majority label. If 90 percent of traces are relevant, a judge that says relevant every time scores 90 percent agreement while telling the user nothing.
+- Percent agreement with a fixed threshold, such as requiring 80 percent. A threshold does not fix the problem above, it just moves it: the same always-relevant judge passes the threshold on an unbalanced set.
+- Krippendorff's alpha. It handles more raters and missing labels, but the toolkit compares one judge against one human label set, so the extra generality adds complexity the milestone does not need.
+
+Why: kappa subtracts the agreement expected by chance from the observed agreement, so a judge only scores well when it agrees with humans beyond what guessing the majority label would give. That is the number a user needs before trusting a judge score, and it takes nothing more than two label lists to compute.
