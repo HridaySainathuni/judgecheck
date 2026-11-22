@@ -1,10 +1,17 @@
-"""Perturbation stability checks for judgecheck.
+"""Reliability checks for judgecheck.
 
-A judge's verdict should not depend on surface details of the trace
-output. ``run_perturbation_check`` runs a judge on the original trace
-and on a small set of deterministic surface perturbations of the trace
-output (case change, extra whitespace, trailing punctuation change)
-and reports whether the verdict stayed the same across all of them.
+Two checks, both of which run judges through the ``Judge`` protocol
+and need no human labels:
+
+- ``run_perturbation_check``: a judge's verdict should not depend on
+  surface details of the trace output, so it runs a judge on the
+  original trace and on a small set of deterministic surface
+  perturbations of the trace output and reports whether the verdict
+  stayed the same across all of them.
+- ``run_cross_judge_agreement``: two judges should agree on the same
+  traces more than chance would predict, so it runs both judges over
+  the same traces and reports their verdict lists, the raw agreement
+  rate, and Cohen's kappa between them.
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from dataclasses import dataclass, field, replace
 
 from judgecheck.judges import Judge
 from judgecheck.records import TraceRecord
+from judgecheck.stats import cohens_kappa
 
 
 def _perturb_case(output: str) -> str:
@@ -108,4 +116,42 @@ def run_perturbation_check(
         original_verdict=original.verdict,
         stable=all(not result.flipped for result in results),
         results=results,
+    )
+
+
+@dataclass
+class CrossJudgeAgreement:
+    """How two judges' verdicts over the same traces compare."""
+
+    verdicts_a: list[bool]
+    verdicts_b: list[bool]
+    kappa: float
+    agreement: float
+
+
+def run_cross_judge_agreement(
+    judge_a: Judge,
+    judge_b: Judge,
+    traces: Sequence[TraceRecord],
+) -> CrossJudgeAgreement:
+    """Run two judges over the same traces and compare their verdicts.
+
+    Returns both verdict lists, the raw agreement rate (the share of
+    traces where the verdicts match), and Cohen's kappa between the
+    verdict lists. Kappa is 1.0 for perfect agreement and 0.0 for
+    agreement at chance level. At least one trace is required.
+    """
+    if not traces:
+        raise ValueError("at least one trace is required")
+
+    verdicts_a = [judge_a.judge(trace).verdict for trace in traces]
+    verdicts_b = [judge_b.judge(trace).verdict for trace in traces]
+    agreement = sum(
+        1 for a, b in zip(verdicts_a, verdicts_b) if a == b
+    ) / len(traces)
+    return CrossJudgeAgreement(
+        verdicts_a=verdicts_a,
+        verdicts_b=verdicts_b,
+        kappa=cohens_kappa(verdicts_a, verdicts_b),
+        agreement=agreement,
     )

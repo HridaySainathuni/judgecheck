@@ -6,7 +6,7 @@ An LLM judge can score a de-identified response as a bad answer and sound confid
 
 ## Status
 
-Milestone 2 is done: configurable LLM judges work. `RelevanceJudge` checks whether a trace output answers its input, and `GroundingJudge` checks whether every claim in the output is supported by the input. Both follow one `Judge` protocol, with the prompt and model set at construction. Next up are the reliability checks.
+Milestone 4 is in progress: perturbation stability checks and cross-judge agreement are built. `run_perturbation_check` tests whether a judge's verdict survives surface changes to a trace output, and `run_cross_judge_agreement` compares two judges over the same traces with a raw agreement rate and Cohen's kappa.
 
 ## Install
 
@@ -85,14 +85,33 @@ human_labels = ["relevant", "not relevant", "not relevant"]
 print(f"kappa: {cohens_kappa(judge_labels, human_labels):.2f}")
 ```
 
+## Reliability
+
+Two checks in `judgecheck.reliability` test whether judge scores can be trusted. Neither needs human labels.
+
+- `run_perturbation_check(judge, trace, perturbations=None)`: runs the judge on the trace and on deterministic surface perturbations of its output (case change, extra whitespace, trailing punctuation change). Returns a `PerturbationReport` with the original verdict, whether the verdict stayed the same across every perturbation (`stable`), and the per-perturbation verdicts with a `flipped_perturbations` list naming the ones that changed the verdict. A flip means the judge is reacting to surface detail instead of content.
+- `run_cross_judge_agreement(judge_a, judge_b, traces)`: runs both judges over the same traces. Returns a `CrossJudgeAgreement` with both verdict lists, the raw agreement rate (the share of traces where the verdicts match), and Cohen's kappa between the verdict lists. Kappa is 1.0 for perfect agreement and 0.0 for agreement at chance level.
+
+```python
+from judgecheck.ingest import load_jsonl
+from judgecheck.judges import GroundingJudge, RelevanceJudge
+from judgecheck.reliability import run_cross_judge_agreement, run_perturbation_check
+
+records = load_jsonl("traces.jsonl")
+
+report = run_perturbation_check(RelevanceJudge(), records[0])
+print(f"stable: {report.stable}, flipped: {report.flipped_perturbations}")
+
+agreement = run_cross_judge_agreement(RelevanceJudge(), GroundingJudge(), records)
+print(f"agreement: {agreement.agreement:.2f}, kappa: {agreement.kappa:.2f}")
+```
+
 ## What it will do
 
 - Ingest traces from OpenTelemetry and JSONL files and from LangSmith exports.
 - Run configurable LLM-as-judge rubrics against those traces.
 - Report Wilson confidence intervals on judge scores.
 - Measure Cohen's kappa against human labels.
-- Run perturbation tests to see if small input changes flip judge scores.
-- Measure agreement across judges.
 
 ## Contributing
 
