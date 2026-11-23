@@ -111,3 +111,33 @@ Alternatives considered:
 - Krippendorff's alpha. It handles more raters and missing labels, but the toolkit compares one judge against one human label set, so the extra generality adds complexity the milestone does not need.
 
 Why: kappa subtracts the agreement expected by chance from the observed agreement, so a judge only scores well when it agrees with humans beyond what guessing the majority label would give. That is the number a user needs before trusting a judge score, and it takes nothing more than two label lists to compute.
+
+## Perturbation stability checks
+
+Date: 2026-11-22
+
+Choice: `run_perturbation_check` in `src/judgecheck/reliability.py` runs a judge on a trace and on deterministic surface perturbations of its output: case change, extra whitespace, and trailing punctuation change. It returns a `PerturbationReport` with the original verdict, whether the verdict stayed the same across every perturbation, and the per-perturbation verdicts. The original trace is never modified; each perturbed run gets a copy with only `output` changed.
+
+Alternatives considered:
+
+- Semantic paraphrases of the output. A paraphrase changes meaning, so a verdict flip would be expected rather than a sign of unreliability, and generating paraphrases needs an LLM call, which makes the check nondeterministic and slow.
+- Random fuzzing of the output. Random changes are not reproducible, so two runs of the same check could disagree and a failure could not be replayed.
+- Adversarial prompts designed to trick the judge. That tests a different property, whether a judge can be manipulated, rather than whether it is stable on ordinary surface variation.
+- Checking stability by running the judge twice on the same trace. That only catches nondeterminism in the judge itself, not sensitivity to how the output happens to be written.
+
+Why: a verdict should depend on what the output says, not on its casing, spacing, or trailing punctuation. Surface perturbations are deterministic, free, and fast, so the check runs offline in CI and any flip names exactly which surface detail the judge reacted to. A stable verdict is not proof the judge is right, but an unstable one is a clear sign its scores cannot be trusted.
+
+## Cross-judge agreement with kappa
+
+Date: 2026-11-22
+
+Choice: `run_cross_judge_agreement` in `src/judgecheck/reliability.py` runs two judges over the same traces and returns a `CrossJudgeAgreement` with both verdict lists, the raw agreement rate (the share of traces where the verdicts match), and Cohen's kappa between the verdict lists, computed by `cohens_kappa` in `src/judgecheck/stats.py`.
+
+Alternatives considered:
+
+- Raw agreement alone. It is easy to read, but it rewards two judges that both pick the majority label. If 90 percent of traces are relevant, two always-relevant judges score 90 percent agreement while telling the user nothing about whether they actually agree on the hard cases.
+- Kappa alone. Kappa corrects for chance, but a single number hides where the judges diverge. Keeping the verdict lists lets the caller look at the specific traces the judges disagreed on.
+- Comparing each judge against human labels instead. That is the right check when human labels exist, and `cohens_kappa` already supports it, but it needs labelled data. Cross-judge agreement works with no human labels at all, so it can run on any trace set.
+- Requiring the rationales to match as well as the verdicts. Two judges can reach the same verdict for different reasons, and rationale text is free-form, so matching it would be stricter than the verdicts the toolkit reports.
+
+Why: two independent judges that agree beyond chance are more trustworthy than one judge alone, and disagreement between them flags traces where the verdict is genuinely uncertain. Kappa is the number that says whether the agreement beats chance, and the raw rate is the number a user reads first, so the check reports both and keeps the verdict lists for inspection.
