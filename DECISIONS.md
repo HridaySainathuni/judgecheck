@@ -141,3 +141,33 @@ Alternatives considered:
 - Requiring the rationales to match as well as the verdicts. Two judges can reach the same verdict for different reasons, and rationale text is free-form, so matching it would be stricter than the verdicts the toolkit reports.
 
 Why: two independent judges that agree beyond chance are more trustworthy than one judge alone, and disagreement between them flags traces where the verdict is genuinely uncertain. Kappa is the number that says whether the agreement beats chance, and the raw rate is the number a user reads first, so the check reports both and keeps the verdict lists for inspection.
+
+## argparse CLI with an injectable judge
+
+Date: 2026-11-24
+
+Choice: the CLI in `src/judgecheck/cli.py` is built on `argparse`, with `main(argv=None, judge=None)` as its entry point. The two positional arguments are the JSONL trace file and the path of the HTML report to write. When no judge is passed, `main` builds a default `RelevanceJudge`; when a judge is passed, it is used as-is. The default judge reads the `ANTHROPIC_API_KEY` environment variable, like every other judge in the toolkit.
+
+Alternatives considered:
+
+- A click or typer based CLI. Both add a dependency and their own argument parsing model for a command that takes two positional arguments and no options. `argparse` is in the standard library and needs no extra install.
+- A `console_scripts` entry point in `pyproject.toml`. That would install a `judgecheck` command, but packaging and distribution are a later milestone. Until then the module runs directly with `python -m judgecheck.cli`, which keeps the milestone free of packaging decisions.
+- Hardcoding the `RelevanceJudge` inside `main` with no injection point. That would make the CLI untestable without a network call and an API key, since every test run would judge real traces through the Anthropic API.
+- Passing the judge choice as a CLI flag, such as `--judge relevance`. That adds a dispatch layer and a string-to-class mapping for a choice that is one line of code for a library user, and it would still need an injection point for tests.
+
+Why: `argparse` keeps the CLI dependency-free and the help text comes free. An injectable judge keeps the CLI testable offline: the tests pass a small judge that checks trace outputs directly, so the suite runs in CI with no API key and no network. The default `RelevanceJudge` keeps the common case a one-liner, and the judge stays a plain `Judge` protocol value, so any judge built for the library works from the command line without changes.
+
+## Static HTML report from a pure render function
+
+Date: 2026-11-24
+
+Choice: `render_report` in `src/judgecheck/cli.py` is a pure function: it takes a list of `TraceResult` values plus the pass count, total, and Wilson interval bounds, and returns the full report as an HTML string. It does no I/O and makes no LLM calls. The CLI writes that string to the output path with `Path.write_text`. The report is a single self-contained HTML file with inline CSS: a summary table (total traces, passes, pass rate, and the Wilson 95 percent interval) and one row per trace with its trace id, PASS or FAIL verdict, and rationale. Trace ids and rationales are HTML-escaped before they are inserted.
+
+Alternatives considered:
+
+- A Jinja2 template. A template engine would separate markup from code, but it adds a dependency for a report with two tables, and a template file would need to be shipped with the package and found at runtime.
+- A live web report served over HTTP. A server would let the report update as new traces arrive, but it adds a running process and a port to a tool whose job is to produce a record of one run. A file can be opened anywhere, attached to a message, or archived.
+- A Markdown or JSON report instead of HTML. Markdown renders unevenly across viewers and JSON is not readable at a glance. HTML opens in any browser with tables the reader can scan, and it is still plain text a script can parse.
+- Building the HTML inside `main` alongside the file write. That would mix rendering with I/O and make the markup untestable without running the whole CLI. A pure function can be tested by calling it and checking the string.
+
+Why: a pure render function is testable in isolation, including the escaping of trace content, and it keeps the CLI thin: load traces, run the judge, render, write. Static HTML needs no server and no JavaScript, so the report works as a file on disk and stays readable years later. Escaping keeps trace content from breaking the markup or injecting HTML into the report.

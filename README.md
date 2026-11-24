@@ -6,7 +6,7 @@ An LLM judge can score a de-identified response as a bad answer and sound confid
 
 ## Status
 
-Milestone 4 is in progress: perturbation stability checks and cross-judge agreement are built. `run_perturbation_check` tests whether a judge's verdict survives surface changes to a trace output, and `run_cross_judge_agreement` compares two judges over the same traces with a raw agreement rate and Cohen's kappa.
+Milestone 5 is in progress: the CLI and static HTML report are built. The CLI judges the traces in a JSONL file with the `RelevanceJudge` and writes a self-contained HTML report with a summary table and one row per trace.
 
 ## Install
 
@@ -105,6 +105,33 @@ print(f"stable: {report.stable}, flipped: {report.flipped_perturbations}")
 agreement = run_cross_judge_agreement(RelevanceJudge(), GroundingJudge(), records)
 print(f"agreement: {agreement.agreement:.2f}, kappa: {agreement.kappa:.2f}")
 ```
+
+## CLI and report
+
+Judge a JSONL trace file from the command line and get a static HTML report:
+
+```bash
+export ANTHROPIC_API_KEY=...
+python -m judgecheck.cli traces.jsonl report.html
+```
+
+The CLI takes two positional arguments: the JSONL trace file and the path of the HTML report to write. It runs the `RelevanceJudge` over every trace, counts the passes, computes the pass rate with a Wilson 95 percent interval, and writes the report. It exits 0 on success.
+
+The report is a single self-contained HTML file with inline CSS, so it opens in any browser with no server. It contains:
+
+- A summary table: total traces, passes, pass rate, and the Wilson 95 percent interval for the pass rate.
+- One row per trace: trace id, PASS or FAIL verdict, and the judge's rationale.
+
+Example output for a two-trace file where one trace passes:
+
+```
+Total traces: 2
+Passes: 1
+Pass rate: 50.0%
+Wilson 95% interval: 0.095 – 0.905
+```
+
+For library use, `main` in `judgecheck.cli` accepts a judge to run instead of the default `RelevanceJudge`, and `render_report` is a pure function that takes the per-trace results and the summary numbers and returns the report as an HTML string. See DECISIONS.md for why the CLI is built this way.
 
 ## What it will do
 
